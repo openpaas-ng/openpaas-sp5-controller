@@ -78,18 +78,18 @@ function sendToBing(content, callback){
 
   var req = https.request(options, function(res){
     res.on('data', function(data){
-      console.log('result: ' + data +'\n---');
+      console.log('result: ' + data);
       try {
         data = JSON.parse(data);
-        if(data.header.status == 'success' && data.results.length > 0){
-          callback(data.results[0].lexical);
-        }
+        callback(data);
       } catch (e) {
         console.error(e);
+        callback(e);
       }
     });
     res.on('error', function(e){
       console.error(e);
+      callback(e);
     });
   });
   req.write(content);
@@ -100,10 +100,26 @@ function sendToBing(content, callback){
 // Jobs processing
 ////////////////////////////////////////////////
 
-function processRequest(audioContent, callback){
-  convertAudio(audioContent, (data) => {
-    sendToBing(data, (result) => { callback(result); });
+
+const kue = require('kue');
+const queue = kue.createQueue();
+
+queue.process('audio', function(job, done) {
+  console.log('Queue: processing job ', job.id);
+  convertAudio(job.data.audio, (data) => {
+    sendToBing(data, (result) => {
+      console.log('Queue: finished job ', job.id +'\n---');
+      return done(null, result);
+    });
   });
+})
+
+function processRequest(audioContent, callback){
+  const job = queue.create('audio', {'audio': audioContent});
+  job.on('complete', function(res) {
+    callback(res);
+  });
+  job.save();
 }
 
 ////////////////////////////////////////////////
@@ -118,13 +134,17 @@ const wss = new WebSocket.Server({
 
 wss.on('connection', function connection(ws) {
   ws.on('message', function incoming(message) {
-    try {
       console.log('received new audio chunk');
-      var audioContent = message.split(',').pop();
-      processRequest(audioContent, (result) => { ws.send(result); });
-    } catch (e) {
-      console.error(e);
-    }
+    var audioContent = message.split(',').pop();
+    processRequest(audioContent, (data) => {
+      if(data.header.status == 'success' && data.results.length > 0){
+        try {
+          ws.send(data.results[0].lexical);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    });
   });
 });
 
