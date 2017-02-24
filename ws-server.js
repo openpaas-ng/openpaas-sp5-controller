@@ -43,57 +43,64 @@ setTimeout(getToken, 8 * 60 * 1000);
 // Audio Processing
 ////////////////////////////////////////////////
 
-function convertAudio(content, callback) {
-  let buf = new Buffer(content, 'base64');
-  fs.writeFile('./res.wav', buf);
+function convertAudio(content) {
+  return new Promise((resolve, reject) => {
 
-  // convert audio to correct format
-  let command = ffmpeg('./res.wav')
-      .audioCodec('pcm_s16le')
-      .output('./converted.wav')
-      .on('end', function(){
-        fs.readFile('./converted.wav', function(err, data){
-          if (err) {
-            console.error(err);
-            return;
-          }
+    try{
+      let buf = new Buffer(content, 'base64');
+      fs.writeFile('./res.wav', buf);
 
-          callback(data);
-        });
-      }).run();
+      // convert audio to correct format
+      let command = ffmpeg('./res.wav')
+          .audioCodec('pcm_s16le')
+          .output('./converted.wav')
+          .on('end', function(){
+            fs.readFile('./converted.wav', function(err, data){
+              if (err) {
+                reject(err);
+              }
+              resolve(data);
+            });
+          }).run();
+    } catch(err) {
+      reject(err);
+    }
+
+  });
 }
 
-function sendToBing(content, callback){
+function sendToBing(content){
+  return new Promise((resolve, reject) =>{
 
-  let options = {
-    hostname: 'speech.platform.bing.com',
-    path: '/recognize?version=3.0&requestid=' + uuid() + '&appid=D4D52672-91D7-4C74-8AD8-42B1D98141A5&format=json&locale=fr-FR&device.os=none&scenarios=ulm&instanceid=' + uuid(),
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer '+ token,
-      'Content-type': 'audio/wav; codec=\'audio/pcm\'; samplerate=48000',
-      'Content-Length': 357878
-    }
-  };
-
-  let req = https.request(options, function(res){
-    res.on('data', function(data){
-      console.log('result: ' + data);
-      try {
-        data = JSON.parse(data);
-        callback(data);
-      } catch (e) {
-        console.error(e);
-        callback(e);
+    let options = {
+      hostname: 'speech.platform.bing.com',
+      path: '/recognize?version=3.0&requestid=' + uuid() + '&appid=D4D52672-91D7-4C74-8AD8-42B1D98141A5&format=json&locale=fr-FR&device.os=none&scenarios=ulm&instanceid=' + uuid(),
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer '+ token,
+        'Content-type': 'audio/wav; codec=\'audio/pcm\'; samplerate=48000',
+        'Content-Length': 357878
       }
+    };
+
+    let req = https.request(options, function(res){
+      res.on('data', function(data){
+        console.log('result: ' + data);
+        try {
+          data = JSON.parse(data);
+          resolve(data);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      res.on('error', function(e){
+        reject(e);
+      });
     });
-    res.on('error', function(e){
-      console.error(e);
-      callback(e);
-    });
+    req.write(content);
+    req.end();
+
   });
-  req.write(content);
-  req.end();
 };
 
 ////////////////////////////////////////////////
@@ -109,21 +116,26 @@ function processJob(callback) {
   } else {
     let audioData = queue.shift();
     console.log('Queue: processing next data');
-    convertAudio(audioData, (data) => {
-      sendToBing(data, (result) => {
-        console.log('Queue: done processing data\n---');
-        try {
+    convertAudio(audioData)
+      .then(sendToBing)
+      .then(
+        (result) => {
+          console.log('Queue: done processing data\n---');
           callback(result);
-        } catch (e) {
-          console.error(e);
+          processJob(callback);
+        },
+        (err) => {
+          console.log('Queue: error processing data:');
+          console.error(err);
+          console.log('---');
+          processJob(callback);
         }
-        processJob(callback);
-      });
-    });
+    );
   }
 }
 
-function startProcessing(callback) {
+function processRequest(audioContent, callback){
+  queue.push(audioContent);
   if(processing){
     return;
   }
