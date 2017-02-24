@@ -117,7 +117,7 @@ function processJob(callback) {
     processing = false;
   } else {
     let audioData = queue.shift();
-    console.log('Queue: processing next data');
+    console.log('Queue: processing next data (%d jobs left)', queue.length);
     convertAudio(audioData)
       .then(sendToBing)
       .then(
