@@ -9,7 +9,7 @@ const WebSocket = require('ws');
 // Token Management
 ////////////////////////////////////////////////
 
-var token = null;
+let token = null;
 
 function getToken() {
   // see https://www.microsoft.com/cognitive-services/en-us/speech-api/documentation/API-Reference-REST/BingVoiceRecognition
@@ -17,7 +17,7 @@ function getToken() {
   // for testing, token can be also be obtained using
   // curl -X POST -H "Ocp-Apim-Subscription-Key: YOURKEY" -d "" https://api.cognitive.microsoft.com/sts/v1.0/issueToken
 
-  var options = {
+  let options = {
     hostname:'api.cognitive.microsoft.com',
     port: 443,
     path:'/sts/v1.0/issueToken',
@@ -44,11 +44,11 @@ setTimeout(getToken, 8 * 60 * 1000);
 ////////////////////////////////////////////////
 
 function convertAudio(content, callback) {
-  var buf = new Buffer(content, 'base64');
+  let buf = new Buffer(content, 'base64');
   fs.writeFile('./res.wav', buf);
 
   // convert audio to correct format
-  var command = ffmpeg('./res.wav')
+  let command = ffmpeg('./res.wav')
       .audioCodec('pcm_s16le')
       .output('./converted.wav')
       .on('end', function(){
@@ -65,7 +65,7 @@ function convertAudio(content, callback) {
 
 function sendToBing(content, callback){
 
-  var options = {
+  let options = {
     hostname: 'speech.platform.bing.com',
     path: '/recognize?version=3.0&requestid=' + uuid() + '&appid=D4D52672-91D7-4C74-8AD8-42B1D98141A5&format=json&locale=fr-FR&device.os=none&scenarios=ulm&instanceid=' + uuid(),
     method: 'POST',
@@ -76,7 +76,7 @@ function sendToBing(content, callback){
     }
   };
 
-  var req = https.request(options, function(res){
+  let req = https.request(options, function(res){
     res.on('data', function(data){
       console.log('result: ' + data);
       try {
@@ -100,27 +100,91 @@ function sendToBing(content, callback){
 // Jobs processing
 ////////////////////////////////////////////////
 
+const queue = [];
+let processing = false;
 
-const kue = require('kue');
-const queue = kue.createQueue();
-
-queue.process('audio', function(job, done) {
-  console.log('Queue: processing job ', job.id);
-  convertAudio(job.data.audio, (data) => {
-    sendToBing(data, (result) => {
-      console.log('Queue: finished job ', job.id +'\n---');
-      return done(null, result);
+function processJob(callback) {
+  if(queue.length == 0){
+    processing = false;
+  } else {
+    let audioData = queue.shift();
+    console.log('Queue: processing next data');
+    convertAudio(audioData, (data) => {
+      sendToBing(data, (result) => {
+        console.log('Queue: done processing data\n---');
+        try {
+          callback(result);
+        } catch (e) {
+          console.error(e);
+        }
+        processJob(callback);
+      });
     });
-  });
-})
-
-function processRequest(audioContent, callback){
-  const job = queue.create('audio', {'audio': audioContent});
-  job.on('complete', function(res) {
-    callback(res);
-  });
-  job.save();
+  }
 }
+
+function startProcessing(callback) {
+  if(processing){
+    return;
+  }
+  processing = true;
+  processJob(callback);
+}
+
+////////////////////////////////////////////////
+// Conferences Management
+////////////////////////////////////////////////
+
+class Conference {
+  constructor(confId) {
+    this.id = confId;
+    this.ws = new Set([]);
+    this.chunks = [];
+  }
+}
+
+
+let conferencesHandler = {
+
+  confs: {},
+
+  register: function(confId, ws) {
+    // ensure conf exists
+    if(!(confId in this.confs)) {
+      this.confs[confId] = new Conference(confId);
+    }
+    this.confs[confId].ws.add(ws);
+  },
+
+  unregister: function(confId, ws) {
+    if(!(confId in this.confs)) {
+      console.error('trying to unregister to non-existing conf ' + confId);
+      return;
+    }
+    this.confs[confId].ws.delete(ws);
+
+    // it was the last registered ws for the conf
+    if(this.confs[confId].ws.size == 0) {
+      delete this.confs[confId];
+    }
+  },
+
+  saveTranscriptChunk: function(confId, chunk) {
+    if(!(confId in this.confs)) {
+      console.error('trying to saveTranscriptionChunk to non-existing conf ' + confId);
+      return;
+    }
+    this.confs[confId].chunks.push(chunk);
+  },
+
+  pushEvent: function(confId, event) {
+    if(!(confId in this.confs)) {
+      console.error('trying to saveTranscriptionChunk to non-existing conf ' + confId);
+      return;
+    }
+    this.confs[confId].ws.forEach((ws) => { ws.send(event); });
+  }
+};
 
 ////////////////////////////////////////////////
 // WS Server
@@ -132,19 +196,41 @@ const wss = new WebSocket.Server({
 });
 
 
-wss.on('connection', function connection(ws) {
-  ws.on('message', function incoming(message) {
-      console.log('received new audio chunk');
-    var audioContent = message.split(',').pop();
-    processRequest(audioContent, (data) => {
-      if(data.header.status == 'success' && data.results.length > 0){
-        try {
-          ws.send(data.results[0].lexical);
-        } catch (e) {
-          console.error(e);
+wss.on('connection', (ws) => {
+
+  ws.on('message', (message) => {
+    console.log('received new audio chunk');
+    message = JSON.parse(message);
+
+    if (message.type == 'register') {
+      conferencesHandler.register(message.confId, ws);
+      ws.confId = message.confId;
+    }
+
+    if (message.type == 'audioData'){
+      let audioContent = message.audioContent.split(',').pop();
+      processRequest(audioContent, (data) => {
+        if(data.header.status == 'success' && data.results.length > 0){
+          try {
+            let res = data.results[0].lexical;
+            conferencesHandler.pushEvent(message.confId, res);
+            conferencesHandler.saveTranscriptChunk(message.confId, res);
+          } catch (e) {
+            console.error(e);
+          }
         }
-      }
-    });
+      });
+    }
+
   });
+
+  ws.on('close', function(e) {
+    conferencesHandler.unregister(ws.confId, ws);
+  });
+
+  ws.on('error', function(e) {
+    conferencesHandler.unregister(ws.confId, ws);
+  });
+
 });
 
