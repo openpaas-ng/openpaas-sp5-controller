@@ -72,6 +72,8 @@ function convertAudio(content) {
 function sendToBing(content){
   return new Promise((resolve, reject) =>{
 
+    var size = fs.statSync('./converted.wav')['size'];
+
     let options = {
       hostname: 'speech.platform.bing.com',
       path: '/recognize?version=3.0&requestid=' + uuid() + '&appid=D4D52672-91D7-4C74-8AD8-42B1D98141A5&format=json&locale=fr-FR&device.os=none&scenarios=ulm&instanceid=' + uuid(),
@@ -79,7 +81,7 @@ function sendToBing(content){
       headers: {
         'Authorization': 'Bearer '+ token,
         'Content-type': 'audio/wav; codec=\'audio/pcm\'; samplerate=48000',
-        'Content-Length': 357878
+        'Content-Length': size
       }
     };
 
