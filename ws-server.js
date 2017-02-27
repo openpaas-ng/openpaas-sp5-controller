@@ -4,6 +4,16 @@ const fs = require('fs-extra');
 const ffmpeg = require('fluent-ffmpeg');
 
 const WebSocket = require('ws');
+const express = require('express');
+const bodyParser = require('body-parser');
+
+const Client = require('node-rest-client').Client;
+const client = new Client();
+
+const callbackIP = '172.17.0.1';
+const port = 9876;
+
+const recoSummaryAPI = 'http://localhost:8090/summary';
 
 ////////////////////////////////////////////////
 // Token Management
@@ -47,7 +57,7 @@ function convertAudio(content) {
   return new Promise((resolve, reject) => {
 
     try{
-      let buf = new Buffer(content, 'base64');
+      let buf = new Buffer(content.audioContent, 'base64');
       fs.writeFile('./res.wav', buf);
 
       // convert audio to correct format
@@ -58,8 +68,10 @@ function convertAudio(content) {
             fs.readFile('./converted.wav', function(err, data){
               if (err) {
                 reject(err);
+              } else {
+                content.audioContent = data;
+                resolve(content);
               }
-              resolve(data);
             });
           }).run();
     } catch(err) {
@@ -87,23 +99,39 @@ function sendToBing(content){
 
     let req = https.request(options, function(res){
       res.on('data', function(data){
-        console.log('result: ' + data);
-        try {
-          data = JSON.parse(data);
-          resolve(data);
-        } catch (e) {
-          reject(e);
-        }
+        content.textContent = data;
+        resolve(content);
       });
       res.on('error', function(e){
         reject(e);
       });
     });
-    req.write(content);
+    req.write(content.audioContent);
     req.end();
 
   });
 };
+
+function parseBingAnswer(content) {
+  return new Promise((resolve, reject) => {
+
+    try {
+      let data = JSON.parse(content.textContent);
+      console.log('result: %j', data);
+
+      if(data.header.status == 'success' && data.results.length > 0){
+        content.textContent = data.results[0].lexical;
+        resolve(content);
+      } else {
+        reject('data.header: ' + data.header + ', data.results: ' + data.results);
+      }
+    } catch (e) {
+      console.error('error parsing ' + content.textContent);
+      reject(e);
+    }
+
+  });
+}
 
 ////////////////////////////////////////////////
 // Jobs processing
@@ -112,37 +140,40 @@ function sendToBing(content){
 const queue = [];
 let processing = false;
 
-function processJob(callback) {
+function processJob() {
   if(queue.length == 0){
     processing = false;
+    console.log('Queue: No more job to process');
   } else {
     let audioData = queue.shift();
     console.log('Queue: processing next data (%d jobs left)', queue.length);
     convertAudio(audioData)
       .then(sendToBing)
+      .then(parseBingAnswer)
       .then(
         (result) => {
           console.log('Queue: done processing data\n---');
-          callback(result);
-          processJob(callback);
+          result.callback(result);
+          processJob();
         },
         (err) => {
           console.log('Queue: error processing data:');
           console.error(err);
           console.log('---');
-          processJob(callback);
+          processJob();
         }
     );
   }
 }
 
-function processRequest(audioContent, callback){
-  queue.push(audioContent);
+function processRequest(content, callback){
+  content.callback = callback;
+  queue.push(content);
   if(processing){
     return;
   }
   processing = true;
-  processJob(callback);
+  processJob();
 }
 
 ////////////////////////////////////////////////
@@ -206,33 +237,49 @@ let conferencesHandler = {
 
 const wss = new WebSocket.Server({
   perMessageDeflate: false,
-  port: 9876
+  port: port
 });
-
 
 wss.on('connection', (ws) => {
 
   ws.on('message', (message) => {
-    console.log('received new audio chunk');
     message = JSON.parse(message);
 
     if (message.type == 'register') {
+      console.log('new participant registered for conf '+ message.confId);
       conferencesHandler.register(message.confId, ws);
       ws.confId = message.confId;
     }
 
     if (message.type == 'audioData'){
+      console.log('received new audio chunk for conf ' + message.confId);
       let audioContent = message.audioContent.split(',').pop();
-      processRequest(audioContent, (data) => {
-        if(data.header.status == 'success' && data.results.length > 0){
-          try {
-            let res = data.results[0].lexical;
-            conferencesHandler.pushEvent(message.confId, res);
-            conferencesHandler.saveTranscriptChunk(message.confId, res);
-          } catch (e) {
-            console.error(e);
-          }
-        }
+      processRequest({confId: message.confId, audioContent: audioContent}, (content) => {
+
+        let entry = {
+          from: '0.0',
+          until: '1.0',
+          speaker: 'placeholder',
+          text: content.textContent
+        };
+
+        let entries = [ entry ];
+
+        let trans_data = {};
+        trans_data['entries'] = entries;
+
+        let args = {
+          parameters: {'id': content.confId,
+                       'callbackurl': 'http://' + callbackIP + ':' + (port + 1) + '/api/summaries/' + content.confId},
+
+          headers: { 'Content-Type': 'application/json' },
+          data: trans_data
+        };
+
+        client.post(recoSummaryAPI, args, function (data, response) {
+          console.log('transcript sent successfully');
+        });
+        conferencesHandler.saveTranscriptChunk(content.confId, content.textContent);
       });
     }
 
@@ -248,3 +295,20 @@ wss.on('connection', (ws) => {
 
 });
 
+
+////////////////////////////////////////////////
+// REST server
+////////////////////////////////////////////////
+
+const app = express();
+app.use(bodyParser.json());
+
+app.post('/api/summaries/:id', function(req, res){
+  console.log('received summary for conf %s : %j', req.params.id, req.body);
+  conferencesHandler.pushEvent(req.params.id, JSON.stringify(req.body));
+  res.send('OK');
+});
+
+app.listen(port + 1, function(){
+  console.log('REST server listening on port ' + (port + 1));
+});
