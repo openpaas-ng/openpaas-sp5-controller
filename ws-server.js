@@ -1,9 +1,12 @@
 const uuid = require('uuid/v4');
+const http = require('http');
 const https = require('https');
 const fs = require('fs-extra');
 const ffmpeg = require('fluent-ffmpeg');
 
 const WebSocket = require('ws');
+const Stomp = require('stompjs');
+const Sock = require('sockjs-client');
 const express = require('express');
 const bodyParser = require('body-parser');
 
@@ -13,7 +16,8 @@ const client = new Client();
 const callbackIP = '172.17.0.1';
 const port = 9876;
 
-const recoSummaryAPI = 'http://localhost:8090/summary';
+const recoSummaryAPIEndpoint = 'localhost';
+const recoSummaryAPIPort = 8090;
 
 ////////////////////////////////////////////////
 // Token Management
@@ -234,6 +238,68 @@ let conferencesHandler = {
 };
 
 ////////////////////////////////////////////////
+// Online reco
+////////////////////////////////////////////////
+
+//const RecoWSClient = new WebSocket('ws://' + recoSummaryAPIEndpoint + '/chat');
+const recoStompClient = Stomp.over(new Sock('http://'+ recoSummaryAPIEndpoint+ ':' + recoSummaryAPIPort + '/chat'));
+recoStompClient.connect();
+
+// schedule reco for all active meeting every `recoInterval` ms
+const recoInterval = 10000;
+setInterval(function(){
+  for (let confId in conferencesHandler.confs) {
+    let options = {
+      hostname: recoSummaryAPIEndpoint,
+      port: recoSummaryAPIPort,
+      path: '/resources?id=' + confId + '&resources=keywords;so',
+      method: 'GET',
+      headers: {
+        'Content-type': 'application/json'
+      }
+    };
+
+    let req = http.get(options, function(response){
+      var body = '';
+      response.on('data', function(d) {
+        body += d;
+      });
+      response.on('end', () =>{
+        conferencesHandler.pushEvent(confId, body);
+      });
+    });
+  }
+}, recoInterval);
+
+const onlineRecoManager = {
+  start: function(id) {
+    let args = {
+      parameters: {'id': id,
+                   'action': 'START'},
+      headers: { 'Content-Type': 'application/json' }
+    };
+
+    client.get('http://' + recoSummaryAPIEndpoint + ':' + recoSummaryAPIPort + '/stream', args, function (data, response) {
+      console.log('Online reco: started for conf %s', id);
+    });
+  },
+  stop: function(id) {
+    let args = {
+      parameters: {'id': id,
+                   'action': 'STOP'},
+      headers: { 'Content-Type': 'application/json' }
+    };
+
+    client.get('http://' + recoSummaryAPIEndpoint + ':' + recoSummaryAPIPort + '/stream', args, function (data, response) {
+      console.log('Online reco: stop for conf %s', id);
+    });
+  },
+  send: function(content) {
+    recoStompClient.send('/app/chat', {}, JSON.stringify(content));
+  }
+};
+
+////////////////////////////////////////////////
 // WS Server
 ////////////////////////////////////////////////
 
@@ -251,6 +317,7 @@ wss.on('connection', (ws) => {
       console.log('new participant registered for conf '+ message.confId);
       conferencesHandler.register(message.confId, ws);
       ws.confId = message.confId;
+      onlineRecoManager.start(message.confId);
     }
 
     if (message.type == 'audioData'){
@@ -258,29 +325,13 @@ wss.on('connection', (ws) => {
       let audioContent = message.audioContent.split(',').pop();
       processRequest({confId: message.confId, audioContent: audioContent}, (content) => {
 
-        let entry = {
-          from: '0.0',
-          until: '1.0',
-          speaker: 'placeholder',
-          text: content.textContent
+        const time = new Date();
+        const entry = {
+          from: message.confId,
+          text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + 'placeholder' + '\t' + content.textContent
         };
+        onlineRecoManager.send(entry);
 
-        let entries = [ entry ];
-
-        let trans_data = {};
-        trans_data['entries'] = entries;
-
-        let args = {
-          parameters: {'id': content.confId,
-                       'callbackurl': 'http://' + callbackIP + ':' + (port + 1) + '/api/summaries/' + content.confId},
-
-          headers: { 'Content-Type': 'application/json' },
-          data: trans_data
-        };
-
-        client.post(recoSummaryAPI, args, function (data, response) {
-          console.log('transcript sent successfully');
-        });
         conferencesHandler.saveTranscriptChunk(content.confId, content.textContent);
       });
     }
