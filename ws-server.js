@@ -64,6 +64,8 @@ function convertAudio(content) {
       let command = ffmpeg('./res.wav')
           .audioCodec('pcm_s16le')
           .output('./converted.wav')
+          .audioFrequency(16000)
+          .audioChannels(1)
           .on('end', function(){
             fs.readFile('./converted.wav', function(err, data){
               if (err) {
