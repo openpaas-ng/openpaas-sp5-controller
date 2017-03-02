@@ -19,6 +19,7 @@ const port = 9876;
 const recoSummaryAPIEndpoint = 'localhost';
 const recoSummaryAPIPort = 8090;
 
+const jobProcessing = require('./lib/jobProcessing.js');
 ////////////////////////////////////////////////
 // Token Management
 ////////////////////////////////////////////////
@@ -57,29 +58,29 @@ setTimeout(getToken, 8 * 60 * 1000);
 // Audio Processing
 ////////////////////////////////////////////////
 
-function convertAudio(content) {
+function convertAudio(audioContent) {
   return new Promise((resolve, reject) => {
 
     try{
-      let buf = new Buffer(content.audioContent, 'base64');
+      let buf = new Buffer(audioContent, 'base64');
       fs.writeFile('./res.wav', buf);
 
       // convert audio to correct format
       let command = ffmpeg('./res.wav')
-          .audioCodec('pcm_s16le')
-          .output('./converted.wav')
-          .audioFrequency(16000)
-          .audioChannels(1)
-          .on('end', function(){
-            fs.readFile('./converted.wav', function(err, data){
-              if (err) {
-                reject(err);
-              } else {
-                content.audioContent = data;
-                resolve(content);
-              }
-            });
-          }).run();
+        .audioCodec('pcm_s16le')
+        .output('./converted.wav')
+        .audioFrequency(16000)
+        .audioChannels(1)
+        .on('end', function(){
+          fs.readFile('./converted.wav', function(err, data){
+            if (err) {
+              reject(err);
+            } else {
+              audioContent = data;
+              resolve(audioContent);
+            }
+          });
+        }).run();
     } catch(err) {
       reject(err);
     }
@@ -87,7 +88,7 @@ function convertAudio(content) {
   });
 }
 
-function sendToBing(content){
+function sendToBing(audioContent){
   return new Promise((resolve, reject) =>{
 
     var size = fs.statSync('./converted.wav')['size'];
@@ -105,81 +106,38 @@ function sendToBing(content){
 
     let req = https.request(options, function(res){
       res.on('data', function(data){
-        content.textContent = data;
-        resolve(content);
+        const textContent = data;
+        resolve(textContent);
       });
       res.on('error', function(e){
         reject(e);
       });
     });
-    req.write(content.audioContent);
+    req.write(audioContent);
     req.end();
 
   });
 };
 
-function parseBingAnswer(content) {
+function parseBingAnswer(textContent) {
   return new Promise((resolve, reject) => {
 
     try {
-      let data = JSON.parse(content.textContent);
+      let data = JSON.parse(textContent);
       console.log('result: %j', data);
 
       if(data.header.status == 'success' && data.results.length > 0){
-        content.textContent = data.results[0].lexical;
-        resolve(content);
+        textContent = data.results[0].lexical;
+        resolve(textContent);
       } else {
         reject('data.header: ' + data.header + ', data.results: ' + data.results);
       }
     } catch (e) {
-      console.error('error parsing ' + content.textContent);
+      console.error('error parsing ' + textContent);
       reject(e);
     }
 
   });
-}
-
-////////////////////////////////////////////////
-// Jobs processing
-////////////////////////////////////////////////
-
-const queue = [];
-let processing = false;
-
-function processJob() {
-  if(queue.length == 0){
-    processing = false;
-    console.log('Queue: No more job to process');
-  } else {
-    let audioData = queue.shift();
-    console.log('Queue: processing next data (%d jobs left)', queue.length);
-    convertAudio(audioData)
-      .then(sendToBing)
-      .then(parseBingAnswer)
-      .then(
-        (result) => {
-          console.log('Queue: done processing data\n---');
-          result.callback(result);
-          processJob();
-        },
-        (err) => {
-          console.log('Queue: error processing data:');
-          console.error(err);
-          console.log('---');
-          processJob();
-        }
-    );
-  }
-}
-
-function processRequest(content, callback){
-  content.callback = callback;
-  queue.push(content);
-  if(processing){
-    return;
-  }
-  processing = true;
-  processJob();
 }
 
 ////////////////////////////////////////////////
@@ -323,16 +281,27 @@ wss.on('connection', (ws) => {
     if (message.type == 'audioData'){
       console.log('received new audio chunk for conf ' + message.confId);
       let audioContent = message.audioContent.split(',').pop();
-      processRequest({confId: message.confId, audioContent: audioContent}, (content) => {
 
-        const time = new Date();
-        const entry = {
-          from: message.confId,
-          text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + 'placeholder' + '\t' + content.textContent
-        };
-        onlineRecoManager.send(entry);
+      jobProcessing.processJob({
+        data: audioContent,
+        process: (audioData) => {
+          return convertAudio(audioData)
+            .then(sendToBing)
+            .then(parseBingAnswer)
+            .then((textContent) => {
+              return new Promise((resolve, reject) => {
+                const time = new Date();
+                const entry = {
+                  from: message.confId,
+                  text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + 'placeholder' + '\t' + textContent
+                };
+                onlineRecoManager.send(entry);
+                conferencesHandler.saveTranscriptChunk(message.confId, textContent);
 
-        conferencesHandler.saveTranscriptChunk(content.confId, content.textContent);
+                resolve(textContent);
+              });
+            });
+        }
       });
     }
 
