@@ -1,0 +1,13 @@
+{
+  "port": 9876,
+  "summaryAPI": {
+    "host": "localhost",
+    "port": 8090
+  },
+  "speechProcessing": {
+    "cognitive": {
+      "key": "XXX",
+      "renewal": 480000
+    }
+  }
+}

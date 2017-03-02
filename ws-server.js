@@ -13,27 +13,19 @@ const bodyParser = require('body-parser');
 const Client = require('node-rest-client').Client;
 const client = new Client();
 
-const callbackIP = '172.17.0.1';
-const port = 9876;
-
-const recoSummaryAPIEndpoint = 'localhost';
-const recoSummaryAPIPort = 8090;
+const config = require('./config.json');
 
 const jobProcessing = require('./lib/jobProcessing.js');
 const conferencesHandler = require('./lib/conferencesHandler.js');
 const speechProcessing = require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js');
-
-speechProcessing.setup({
-  key: # YOUR KEY HERE #,
-  renewal: 8 * 60 * 1000
-});
+speechProcessing.setup(config.speechProcessing.cognitive);
 
 ////////////////////////////////////////////////
 // Online reco
 ////////////////////////////////////////////////
 
 //const RecoWSClient = new WebSocket('ws://' + recoSummaryAPIEndpoint + '/chat');
-const recoStompClient = Stomp.over(new Sock('http://'+ recoSummaryAPIEndpoint+ ':' + recoSummaryAPIPort + '/chat'));
+const recoStompClient = Stomp.over(new Sock('http://'+ config.summaryAPI.host+ ':' + config.summaryAPI.port + '/chat'));
 recoStompClient.connect();
 
 // schedule reco for all active meeting every `recoInterval` ms
@@ -41,8 +33,8 @@ const recoInterval = 10000;
 setInterval(function(){
   for (let confId in conferencesHandler.confs) {
     let options = {
-      hostname: recoSummaryAPIEndpoint,
-      port: recoSummaryAPIPort,
+      hostname: config.summaryAPI.host,
+      port: config.summaryAPI.port,
       path: '/resources?id=' + confId + '&resources=keywords;so',
       method: 'GET',
       headers: {
@@ -70,7 +62,7 @@ const onlineRecoManager = {
       headers: { 'Content-Type': 'application/json' }
     };
 
-    client.get('http://' + recoSummaryAPIEndpoint + ':' + recoSummaryAPIPort + '/stream', args, function (data, response) {
+    client.get('http://' + config.summaryAPI.host + ':' + config.summaryAPI.port + '/stream', args, function (data, response) {
       console.log('Online reco: started for conf %s', id);
     });
   },
@@ -81,7 +73,7 @@ const onlineRecoManager = {
       headers: { 'Content-Type': 'application/json' }
     };
 
-    client.get('http://' + recoSummaryAPIEndpoint + ':' + recoSummaryAPIPort + '/stream', args, function (data, response) {
+    client.get('http://' + config.summaryAPI.host + ':' + config.summaryAPI.port + '/stream', args, function (data, response) {
       console.log('Online reco: stop for conf %s', id);
     });
   },
@@ -96,7 +88,7 @@ const onlineRecoManager = {
 
 const wss = new WebSocket.Server({
   perMessageDeflate: false,
-  port: port
+  port: config.port
 });
 
 wss.on('connection', (ws) => {
@@ -162,6 +154,6 @@ app.post('/api/summaries/:id', function(req, res){
   res.send('OK');
 });
 
-app.listen(port + 1, function(){
-  console.log('REST server listening on port ' + (port + 1));
+app.listen(config.port + 1, function(){
+  console.log('REST server listening on port ' + (config.port + 1));
 });
