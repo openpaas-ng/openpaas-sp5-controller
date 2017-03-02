@@ -19,68 +19,8 @@ const jobProcessing = require('./lib/jobProcessing.js');
 const conferencesHandler = require('./lib/conferencesHandler.js');
 const speechProcessing = require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js');
 speechProcessing.setup(config.speechProcessing.cognitive);
-
-////////////////////////////////////////////////
-// Online reco
-////////////////////////////////////////////////
-
-//const RecoWSClient = new WebSocket('ws://' + recoSummaryAPIEndpoint + '/chat');
-const recoStompClient = Stomp.over(new Sock('http://'+ config.summaryAPI.host+ ':' + config.summaryAPI.port + '/chat'));
-recoStompClient.connect();
-
-// schedule reco for all active meeting every `recoInterval` ms
-const recoInterval = 10000;
-setInterval(function(){
-  for (let confId in conferencesHandler.confs) {
-    let options = {
-      hostname: config.summaryAPI.host,
-      port: config.summaryAPI.port,
-      path: '/resources?id=' + confId + '&resources=keywords;so',
-      method: 'GET',
-      headers: {
-        'Content-type': 'application/json'
-      }
-    };
-
-    let req = http.get(options, function(response){
-      var body = '';
-      response.on('data', function(d) {
-        body += d;
-      });
-      response.on('end', () =>{
-        conferencesHandler.pushEvent(confId, body);
-      });
-    });
-  }
-}, recoInterval);
-
-const onlineRecoManager = {
-  start: function(id) {
-    let args = {
-      parameters: {'id': id,
-                   'action': 'START'},
-      headers: { 'Content-Type': 'application/json' }
-    };
-
-    client.get('http://' + config.summaryAPI.host + ':' + config.summaryAPI.port + '/stream', args, function (data, response) {
-      console.log('Online reco: started for conf %s', id);
-    });
-  },
-  stop: function(id) {
-    let args = {
-      parameters: {'id': id,
-                   'action': 'STOP'},
-      headers: { 'Content-Type': 'application/json' }
-    };
-
-    client.get('http://' + config.summaryAPI.host + ':' + config.summaryAPI.port + '/stream', args, function (data, response) {
-      console.log('Online reco: stop for conf %s', id);
-    });
-  },
-  send: function(content) {
-    recoStompClient.send('/app/chat', {}, JSON.stringify(content));
-  }
-};
+const onlineRecoManager = require('./lib/onlineReco.js');
+onlineRecoManager.setup(config.summaryAPI);
 
 ////////////////////////////////////////////////
 // WS Server
