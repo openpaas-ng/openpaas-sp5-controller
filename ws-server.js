@@ -1,17 +1,6 @@
-const uuid = require('uuid/v4');
-const http = require('http');
-const https = require('https');
-const fs = require('fs-extra');
-const ffmpeg = require('fluent-ffmpeg');
-
 const WebSocket = require('ws');
-const Stomp = require('stompjs');
-const Sock = require('sockjs-client');
 const express = require('express');
 const bodyParser = require('body-parser');
-
-const Client = require('node-rest-client').Client;
-const client = new Client();
 
 const config = require('./config.json');
 
