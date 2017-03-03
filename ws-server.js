@@ -17,10 +17,18 @@ const config = require('./config.json');
 
 const jobProcessing = require('./lib/jobProcessing.js');
 const conferencesHandler = require('./lib/conferencesHandler.js');
-const speechProcessing = require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js');
-speechProcessing.setup(config.speechProcessing.cognitive);
-const onlineRecoManager = require('./lib/onlineReco.js');
-onlineRecoManager.setup(config.summaryAPI);
+const speechProcessing = require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js')(config.speechProcessing.cognitive);
+const onlineRecoManager = require('./lib/onlineReco.js')(config.summaryAPI);
+
+
+// schedule reco for all active meeting every `recoInterval` ms
+setInterval(
+  () => {
+    for (let confId in conferencesHandler.confs) {
+      onlineRecoManager.getOnlineReco(confId)
+        .then(res => conferencesHandler.pushEvent(confId, res));
+    }
+  }, config.summaryAPI.recoInterval);
 
 ////////////////////////////////////////////////
 // WS Server
