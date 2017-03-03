@@ -1,5 +1,10 @@
 {
-  "port": 9876,
+  "ws": {
+    "port": 9876
+  },
+  "rest": {
+    "port": 9877
+  },
   "summaryAPI": {
     "host": "localhost",
     "port": 8090,

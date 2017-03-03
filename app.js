@@ -25,7 +25,7 @@ setInterval(
 
 const wss = new WebSocket.Server({
   perMessageDeflate: false,
-  port: config.port
+  port: config.ws.port
 });
 
 wss.on('connection', (ws) => {
@@ -91,6 +91,6 @@ app.post('/api/summaries/:id', function(req, res){
   res.send('OK');
 });
 
-app.listen(config.port + 1, function(){
-  console.log('REST server listening on port ' + (config.port + 1));
+app.listen(config.rest.port, function(){
+  console.log('REST server listening on port ' + (config.rest.port));
 });
