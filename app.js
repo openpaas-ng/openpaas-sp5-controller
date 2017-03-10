@@ -94,6 +94,15 @@ wss.on('connection', (ws) => {
 const app = express();
 app.use(bodyParser.json());
 
+app.get('/api/transcripts/:id', function(req, res){
+  console.log('received request for transcript %s', req.params.id);
+  if(!(req.params.id in conferencesHandler.confs)) {
+    res.sendStatus(404);
+  } else {
+    res.send(JSON.stringify(conferencesHandler.getTranscript(req.params.id)));
+  }
+});
+
 app.post('/api/summaries/:id', function(req, res){
   console.log('received summary for conf %s : %j', req.params.id, req.body);
   conferencesHandler.pushEvent(req.params.id, JSON.stringify(req.body));
