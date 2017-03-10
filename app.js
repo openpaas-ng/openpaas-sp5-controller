@@ -50,13 +50,22 @@ wss.on('connection', (ws) => {
           return speechProcessing.audioToTranscript(audioData)
             .then((textContent) => {
               return new Promise((resolve, reject) => {
+
+                // TODO fix user 'placeolder'
+                const user = 'placeholder';
+
                 const time = new Date();
                 const entry = {
                   from: message.confId,
-                  text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + 'placeholder' + '\t' + textContent
+                  text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + user + '\t' + textContent
                 };
                 onlineRecoManager.send(entry);
-                conferencesHandler.saveTranscriptChunk(message.confId, textContent);
+                conferencesHandler.saveTranscriptChunk(message.confId,
+                                                       { 'from': time.getTime(),
+                                                         'until': time.getTime() +1,
+                                                         'speaker': user,
+                                                         'text': textContent
+                                                       });
 
                 resolve(textContent);
               });
