@@ -23,13 +23,13 @@ const speechProcessing = function(){
 }();
 
 // schedule reco for all active meeting every `recoInterval` ms
-setInterval(
-  () => {
-    for (let confId in conferencesHandler.confs) {
-      onlineRecoManager.getOnlineReco(confId)
-        .then(res => conferencesHandler.pushEvent(confId, res));
-    }
-  }, config.summaryAPI.recoInterval);
+conferencesHandler.scheduleEvent(
+  (confId) => {
+    onlineRecoManager.getOnlineReco(confId)
+      .then(res => conferencesHandler.pushEvent(confId, res));
+  },
+  config.summaryAPI.recoInterval
+);
 
 ////////////////////////////////////////////////
 // REST server
