@@ -6,9 +6,19 @@ const config = require('./config.json');
 
 const jobProcessing = require('./lib/jobProcessing.js');
 const conferencesHandler = require('./lib/conferencesHandler.js');
-const speechProcessing = require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js')(config.speechProcessing.cognitive);
 const onlineRecoManager = require('./lib/onlineReco.js')(config.summaryAPI);
 
+const speechProcessing = function(){
+  switch(config.speechProcessing.backend) {
+  case 'kaldi':
+    return require('./lib/speechengine/kaldi/kaldi.js')(config.speechProcessing.kaldi);
+  case 'cognitive':
+    return require('./lib/speechengine/thirdparties/microsoft-cognitive/cognitive.js')(config.speechProcessing.cognitive);
+  default:
+    throw new Error('unknown speech processing backend ' +
+                    config.speechProcessing.backend);
+  }
+}();
 
 // schedule reco for all active meeting every `recoInterval` ms
 setInterval(

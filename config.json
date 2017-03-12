@@ -11,6 +11,7 @@
     "recoInterval": 10000
   },
   "speechProcessing": {
+    "backend": "kaldi",
     "kaldi": {
       "gstreamerURL": "ws://localhost:8888"
     },
