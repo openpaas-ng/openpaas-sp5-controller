@@ -11,6 +11,9 @@
     "recoInterval": 10000
   },
   "speechProcessing": {
+    "kaldi": {
+      "gstreamerURL": "ws://localhost:8888"
+    },
     "cognitive": {
       "key": "XXX",
       "renewal": 480000
