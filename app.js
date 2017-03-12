@@ -1,3 +1,5 @@
+const fs = require('fs');
+const https = require('https');
 const WebSocket = require('ws');
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -30,12 +32,41 @@ setInterval(
   }, config.summaryAPI.recoInterval);
 
 ////////////////////////////////////////////////
+// REST server
+////////////////////////////////////////////////
+
+const app = express();
+app.use(bodyParser.json());
+
+app.get('/api/transcripts/:id', function(req, res){
+  console.log('received request for transcript %s', req.params.id);
+  if(!(req.params.id in conferencesHandler.confs)) {
+    res.sendStatus(404);
+  } else {
+    res.send(JSON.stringify(conferencesHandler.getTranscript(req.params.id)));
+  }
+});
+
+app.post('/api/summaries/:id', function(req, res){
+  console.log('received summary for conf %s : %j', req.params.id, req.body);
+  conferencesHandler.pushEvent(req.params.id, JSON.stringify(req.body));
+  res.send('OK');
+});
+
+const credentials = {
+  key: fs.readFileSync(config.ssl.key, 'utf8'),
+  cert: fs.readFileSync(config.ssl.cert, 'utf8')
+};
+
+const sserver = https.createServer(credentials, app);
+
+////////////////////////////////////////////////
 // WS Server
 ////////////////////////////////////////////////
 
 const wss = new WebSocket.Server({
-  perMessageDeflate: false,
-  port: config.ws.port
+  server: sserver,
+  perMessageDeflate: false
 });
 
 wss.on('connection', (ws) => {
@@ -107,29 +138,4 @@ wss.on('connection', (ws) => {
 
 });
 
-
-////////////////////////////////////////////////
-// REST server
-////////////////////////////////////////////////
-
-const app = express();
-app.use(bodyParser.json());
-
-app.get('/api/transcripts/:id', function(req, res){
-  console.log('received request for transcript %s', req.params.id);
-  if(!(req.params.id in conferencesHandler.confs)) {
-    res.sendStatus(404);
-  } else {
-    res.send(JSON.stringify(conferencesHandler.getTranscript(req.params.id)));
-  }
-});
-
-app.post('/api/summaries/:id', function(req, res){
-  console.log('received summary for conf %s : %j', req.params.id, req.body);
-  conferencesHandler.pushEvent(req.params.id, JSON.stringify(req.body));
-  res.send('OK');
-});
-
-app.listen(config.rest.port, function(){
-  console.log('REST server listening on port ' + (config.rest.port));
-});
+sserver.listen(config.port);

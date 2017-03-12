@@ -1,9 +1,8 @@
 {
-  "ws": {
-    "port": 9876
-  },
-  "rest": {
-    "port": 9877
+  "port": 9876,
+  "ssl": {
+    "key":"sslcert/key.pem",
+    "cert":"sslcert/server.crt"
   },
   "summaryAPI": {
     "host": "localhost",
