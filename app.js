@@ -26,7 +26,14 @@ const speechProcessing = function(){
 conferencesHandler.scheduleEvent(
   (confId) => {
     onlineRecoManager.getOnlineReco(confId)
-      .then(res => conferencesHandler.pushEvent(confId, res));
+      .then(res => {
+        const msg = JSON.parse(res);
+        if(Object.keys(msg.keywords).length == 1 && msg.keywords[""] == 0) {
+          // this is an empty "dummy" reco, ignore it
+          return;
+        }
+        conferencesHandler.pushEvent(confId, res);
+      });
   },
   config.summaryAPI.recoInterval
 );
