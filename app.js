@@ -41,7 +41,7 @@ wss.on('connection', (ws) => {
     }
 
     if (message.type == 'audioData'){
-      console.log('received new audio chunk for conf ' + message.confId);
+      console.log('received new audio chunk for conf %s from %s', message.confId, message.userId);
       let audioContent = message.audioContent.split(',').pop();
 
       jobProcessing.processJob({
@@ -51,9 +51,7 @@ wss.on('connection', (ws) => {
             .then((textContent) => {
               return new Promise((resolve, reject) => {
 
-                // TODO fix user 'placeolder'
-                const user = 'placeholder';
-
+                const user = message.userId;
                 const time = new Date();
                 const entry = {
                   from: message.confId,
