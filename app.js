@@ -48,24 +48,37 @@ wss.on('connection', (ws) => {
         data: audioContent,
         process: (audioData) => {
           return speechProcessing.audioToTranscript(audioData)
-            .then((textContent) => {
+            .then((transContent) => {
               return new Promise((resolve, reject) => {
 
-                const user = message.userId;
-                const time = new Date();
-                const entry = {
-                  from: message.confId,
-                  text: time.getTime() + '\t' + (time.getTime() + 1) + '\t' + user + '\t' + textContent
-                };
-                onlineRecoManager.send(entry);
-                conferencesHandler.saveTranscriptChunk(message.confId,
-                                                       { 'from': time.getTime(),
-                                                         'until': time.getTime() +1,
-                                                         'speaker': user,
-                                                         'text': textContent
-                                                       });
+                if(transContent.length == 0) {
+                  reject('empty transContent');
+                } else {
+                  // collapse all transcript segments into one
+                  const user = message.userId;
+                  const startTime = transContent[0].from;
+                  let endTime;
+                  let fullTranscript = '';
 
-                resolve(textContent);
+                  for (let transSegment of transContent) {
+                    endTime = transSegment.until;
+                    fullTranscript += transSegment.text + ' ';
+                  }
+
+                  onlineRecoManager.send({
+                    from: message.confId,
+                    text: startTime + '\t' + endTime + '\t' + user + '\t' + fullTranscript
+                  });
+
+                  conferencesHandler.saveTranscriptChunk(message.confId,
+                                                         { 'from': startTime,
+                                                           'until': endTime,
+                                                           'speaker': user,
+                                                           'text': fullTranscript
+                                                         });
+
+                  resolve(transContent);
+                }
               });
             });
         }
