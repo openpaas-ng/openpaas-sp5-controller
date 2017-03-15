@@ -28,7 +28,7 @@ conferencesHandler.scheduleEvent(
     onlineRecoManager.getOnlineReco(confId)
       .then(res => {
         const msg = JSON.parse(res);
-        if(Object.keys(msg.keywords).length == 1 && msg.keywords[""] == 0) {
+        if(msg.keywords.length == 0) {
           // this is an empty "dummy" reco, ignore it
           return;
         }
