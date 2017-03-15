@@ -7,7 +7,8 @@
   "summaryAPI": {
     "host": "localhost",
     "port": 8090,
-    "recoInterval": 10000
+    "recoInterval": 10000,
+    "reconnectInterval": 5000
   },
   "speechProcessing": {
     "backend": "kaldi",
