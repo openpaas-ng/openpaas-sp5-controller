@@ -22,6 +22,22 @@ const speechProcessing = function(){
   }
 }();
 
+// schedule reco for all active meeting every `recoInterval` ms
+conferencesHandler.scheduleEvent(
+  (confId) => {
+    onlineRecoManager.getOnlineReco(confId)
+      .then(res => {
+        const msg = JSON.parse(res);
+        if(msg.keywords.length == 0) {
+          // this is an empty "dummy" reco, ignore it
+          return;
+        }
+        conferencesHandler.pushEvent(confId, res);
+      });
+  },
+  8000//config.summaryAPI.recoInterval
+);
+
 ////////////////////////////////////////////////
 // REST server
 ////////////////////////////////////////////////
@@ -62,82 +78,75 @@ const wss = new WebSocket.Server({
 
 wss.on('connection', (ws) => {
 
-  ws.on('message', (message) => {
-    message = JSON.parse(message);
+  let receivedRegister = false;
+  let confId;
+  let userId;
 
-    if (message.type == 'register') {
-      console.log('new participant registered for conf '+ message.confId);
-      conferencesHandler.register(message.confId, ws);
-      ws.confId = message.confId;
-      onlineRecoManager.start(message.confId);
-    }
-
-    if (message.type == 'audioData'){
-      console.log('received new audio chunk for conf %s from %s', message.confId, message.userId);
-      let audioContent = message.audioContent.split(',').pop();
-
-      jobProcessing.processJob({
-        data: audioContent,
-        process: (audioData) => {
-          return speechProcessing.audioToTranscript(audioData)
-            .then((transContent) => {
-              return new Promise((resolve, reject) => {
-
-                if(transContent.length == 0) {
-                  reject('empty transContent');
-                } else {
-                  // collapse all transcript segments into one
-                  const user = message.userId;
-                  const startTime = transContent[0].from;
-                  let endTime;
-                  let fullTranscript = '';
-
-                  for (let transSegment of transContent) {
-                    endTime = transSegment.until;
-                    fullTranscript += transSegment.text + ' ';
-                  }
-
-                  onlineRecoManager.send({
-                    from: message.confId,
-                    text: startTime + '\t' + endTime + '\t' + user + '\t' + fullTranscript
-                  });
-
-                  // schedule recommendation
-                  setTimeout(() => {
-                    onlineRecoManager.getOnlineReco(message.confId)
-                      .then(res => {
-                        const msg = JSON.parse(res);
-                        if(msg.keywords.length == 0) {
-                          // this is an empty "dummy" reco, ignore it
-                          return;
-                        }
-                        conferencesHandler.pushEvent(message.confId, res);
-                      });
-                  }, config.recoDelay);
-
-                  conferencesHandler.saveTranscriptChunk(message.confId,
-                                                         { 'from': startTime,
-                                                           'until': endTime,
-                                                           'speaker': user,
-                                                           'text': fullTranscript
-                                                         });
-
-                  resolve(transContent);
-                }
-              });
-            });
-        }
+  let transcriptManager = {
+    transcriptWS: null,
+    openPlanned: false,
+    bufferedMessages: [],
+    open: () => {
+      transcriptManager.openPlanned = false;
+      transcriptManager.transcriptWS = speechProcessing.getTranscriptSocket((segment) => {
+        segment.speaker = userId;
+        onlineRecoManager.send({
+          from: confId,
+          text: segment.from + '\t' + segment.until + '\t' + segment.speaker + '\t' + segment.text
+        });
+        conferencesHandler.saveTranscriptChunk(confId, segment);
       });
+    },
+    send: (message) => {
+      if(transcriptManager.transcriptWS && transcriptManager.transcriptWS.readyState == WebSocket.OPEN) {
+        // empty buffered messages
+        while(transcriptManager.bufferedMessages.length > 0){
+          transcriptManager.transcriptWS.send(transcriptManager.bufferedMessages.shift());
+        }
+        transcriptManager.transcriptWS.send(message);
+      } else {
+        transcriptManager.bufferedMessages.push(message);
+        if(transcriptManager.openPlanned ||
+           (transcriptManager.transcriptWS && transcriptManager.transcriptWS.readyState == WebSocket.CONNECTING)) {
+          console.error('transcriptWS not ready yet');
+        } else {
+          console.error('transcriptWS not available, trying to reconnect in 500ms ' + transcriptManager.transcriptWS.readyState);
+          transcriptManager.openPlanned = true;
+          setTimeout(transcriptManager.open, 500);
+        }
+      }
+    },
+    close: () => {
+      if(transcriptManager.transcriptWS && transcriptManager.transcriptWS.readyState == WebSocket.OPEN) {
+        transcriptManager.transcriptWS.send('EOF');
+      }
+      transcriptManager.transcriptWS.close();
     }
+  };
 
+  ws.on('message', (message) => {
+
+    if (!receivedRegister) {
+      console.log('new participant registered for conf '+ message.confId);
+
+      message = JSON.parse(message);
+
+      receivedRegister = true;
+      confId = message.confId;
+      userId = message.userId;
+
+      conferencesHandler.register(confId, ws);
+      onlineRecoManager.start(confId);
+
+      transcriptManager.open();
+    } else {
+      transcriptManager.send(message);
+    }
   });
 
   ws.on('close', function(e) {
-    conferencesHandler.unregister(ws.confId, ws);
-  });
-
-  ws.on('error', function(e) {
-    conferencesHandler.unregister(ws.confId, ws);
+    conferencesHandler.unregister(confId, ws);
+    transcriptManager.close();
   });
 
 });
