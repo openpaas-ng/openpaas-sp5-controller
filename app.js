@@ -22,22 +22,6 @@ const speechProcessing = function(){
   }
 }();
 
-// schedule reco for all active meeting every `recoInterval` ms
-conferencesHandler.scheduleEvent(
-  (confId) => {
-    onlineRecoManager.getOnlineReco(confId)
-      .then(res => {
-        const msg = JSON.parse(res);
-        if(msg.keywords.length == 0) {
-          // this is an empty "dummy" reco, ignore it
-          return;
-        }
-        conferencesHandler.pushEvent(confId, res);
-      });
-  },
-  config.summaryAPI.recoInterval
-);
-
 ////////////////////////////////////////////////
 // REST server
 ////////////////////////////////////////////////
@@ -117,6 +101,19 @@ wss.on('connection', (ws) => {
                     from: message.confId,
                     text: startTime + '\t' + endTime + '\t' + user + '\t' + fullTranscript
                   });
+
+                  // schedule recommendation
+                  setTimeout(() => {
+                    onlineRecoManager.getOnlineReco(message.confId)
+                      .then(res => {
+                        const msg = JSON.parse(res);
+                        if(msg.keywords.length == 0) {
+                          // this is an empty "dummy" reco, ignore it
+                          return;
+                        }
+                        conferencesHandler.pushEvent(message.confId, res);
+                      });
+                  }, config.recoDelay);
 
                   conferencesHandler.saveTranscriptChunk(message.confId,
                                                          { 'from': startTime,

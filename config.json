@@ -4,10 +4,10 @@
     "key":"sslcert/key.pem",
     "cert":"sslcert/server.crt"
   },
+  "recoDelay": 4000,
   "summaryAPI": {
     "host": "localhost",
     "port": 8090,
-    "recoInterval": 10000,
     "reconnectInterval": 5000
   },
   "speechProcessing": {
